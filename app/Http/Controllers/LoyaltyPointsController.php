@@ -193,10 +193,10 @@ class LoyaltyPointsController extends Controller
         $points_amount = 0;
 
         if ($pointsRule = LoyaltyPointsRule::where('points_rule', '=', $points_rule)->first()) {
-            /*$points_amount = match ($pointsRule->accrual_type) {
+            $points_amount = match ($pointsRule->accrual_type) {
                 config('loyalty_points.accrual_type.relative') => ($payment_amount / 100) * $pointsRule->accrual_value,
                 config('loyalty_points.accrual_type.absolute') => $pointsRule->accrual_value,
-            };*/
+            };
         }
 
         return LoyaltyPointsTransaction::create([
