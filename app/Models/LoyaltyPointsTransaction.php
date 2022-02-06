@@ -31,7 +31,7 @@ class LoyaltyPointsTransaction extends Model
 
         return LoyaltyPointsTransaction::create([
             'account_id' => $account_id,
-            'points_rule' => $pointsRule?->id,
+            'points_rule' => $pointsRule->id,
             'points_amount' => $points_amount,
             'description' => $description,
             'payment_id' => $payment_id,
