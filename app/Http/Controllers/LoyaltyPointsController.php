@@ -4,55 +4,108 @@ namespace App\Http\Controllers;
 
 use App\Mail\LoyaltyPointsReceived;
 use App\Models\LoyaltyAccount;
+use App\Models\LoyaltyPointsRule;
 use App\Models\LoyaltyPointsTransaction;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 class LoyaltyPointsController extends Controller
 {
-    public function deposit()
-    {
-        $data = $_POST;
+    /**
+     * @var LoyaltyAccount
+     */
+    private $account;
 
-        Log::info('Deposit transaction input: ' . print_r($data, true));
+    public function __construct()
+    {
+        $this->account = new AccountController();
+    }
+
+    /**
+     * Метод Начисление баллов лояльности
+     *
+     * account_id        - значение поля из типа
+     * account_type  - тип запроса (из массива $account_type)
+     * loyalty_points_rule  - правило начисления
+     * description  - описание
+     * payment_id  - ID платежа
+     * payment_amount  - сумма платежа
+     * payment_time  - время платежа
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     * @author Mikhail Shapshay
+     */
+    public function deposit(Request $request)
+    {
+        $request->validate([
+            'account_id' => 'required|numeric',
+            'account_type' => 'required|min:4',
+            'loyalty_points_rule' => 'required|min:4',
+            'description' => 'required|min:2',
+            'payment_id' => 'required|min:4',
+            'payment_amount' => 'required',
+            'payment_time' => 'required',
+        ]);
+
+        $data = $request;
+
+        Log::info(config('loyalty_points.messages.transaction_input') . print_r($data, true));
 
         $type = $data['account_type'];
         $id = $data['account_id'];
-        if (($type == 'phone' || $type == 'card' || $type == 'email') && $id != '') {
-            if ($account = LoyaltyAccount::where($type, '=', $id)->first()) {
-                if ($account->active) {
-                    $transaction =  LoyaltyPointsTransaction::performPaymentLoyaltyPoints($account->id, $data['loyalty_points_rule'], $data['description'], $data['payment_id'], $data['payment_amount'], $data['payment_time']);
+        if (in_array($type, $this->account->account_type) && !empty($id)) {
+            $this->account->getAccount($type, $id);
+            if ($this->account) {
+                if ($this->account->active) {
+                    $transaction =  $this->performPaymentLoyaltyPoints($this->account->id, $data['loyalty_points_rule'], $data['description'], $data['payment_id'], $data['payment_amount'], $data['payment_time']);
                     Log::info($transaction);
-                    if ($account->email != '' && $account->email_notification) {
-                        Mail::to($account)->send(new LoyaltyPointsReceived($transaction->points_amount, $account->getBalance()));
+                    if (!empty($this->account->email) && $this->account->email_notification) {
+                        Mail::to($this->account)->send(new LoyaltyPointsReceived($transaction->points_amount, $this->account->getBalance()));
                     }
-                    if ($account->phone != '' && $account->phone_notification) {
+                    if (!empty($this->account->phone) && $this->account->phone_notification) {
                         // instead SMS component
-                        Log::info('You received' . $transaction->points_amount . 'Your balance' . $account->getBalance());
+                        Log::info(config('loyalty_points.messages.received') . $transaction->points_amount . config('loyalty_points.messages.balance') . $this->account->getBalance());
                     }
                     return $transaction;
                 } else {
-                    Log::info('Account is not active');
-                    return response()->json(['message' => 'Account is not active'], 400);
+                    Log::info(config('account.messages.not_active'));
+                    return response()->json(['message' => config('account.messages.not_active')], 400);
                 }
             } else {
-                Log::info('Account is not found');
-                return response()->json(['message' => 'Account is not found'], 400);
+                Log::info(config('account.messages.not_found'));
+                return response()->json(['message' => config('account.messages.not_found')], 400);
             }
         } else {
-            Log::info('Wrong account parameters');
-            throw new \InvalidArgumentException('Wrong account parameters');
+            Log::info(config('account.messages.parameters'));
+            throw new \InvalidArgumentException(config('account.messages.parameters'));
         }
     }
 
-    public function cancel()
+    /**
+     * Метод Отмены начисления баллов лояльности
+     *
+     * transaction_id  - ID транзакции
+     * cancellation_reason  - причина отмены
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     * @author Mikhail Shapshay
+     */
+    public function cancel(Request $request)
     {
-        $data = $_POST;
+        $request->validate([
+            'transaction_id' => 'required|numeric',
+            'cancellation_reason' => 'required|min:2',
+        ]);
+
+        $data = $request;
 
         $reason = $data['cancellation_reason'];
 
         if ($reason == '') {
-            return response()->json(['message' => 'Cancellation reason is not specified'], 400);
+            return response()->json(['message' => config('loyalty_points.messages.cancel_reason')], 400);
         }
 
         if ($transaction = LoyaltyPointsTransaction::where('id', '=', $data['transaction_id'])->where('canceled', '=', 0)->first()) {
@@ -60,44 +113,119 @@ class LoyaltyPointsController extends Controller
             $transaction->cancellation_reason = $reason;
             $transaction->save();
         } else {
-            return response()->json(['message' => 'Transaction is not found'], 400);
+            return response()->json(['message' => config('loyalty_points.messages.transaction_not_found')], 400);
         }
     }
 
-    public function withdraw()
+    /**
+     * Метод Начисление баллов лояльности за покупку
+     *
+     * account_id        - значение поля из типа
+     * account_type  - тип запроса (из массива $account_type)
+     * description  - описание
+     * points_amount  - количество баллов
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     * @author Mikhail Shapshay
+     */
+    public function withdraw(Request $request)
     {
-        $data = $_POST;
+        $request->validate([
+            'account_id' => 'required|numeric',
+            'account_type' => 'required|min:4',
+            'points_amount' => 'required',
+            'description' => 'required|min:2',
+        ]);
 
-        Log::info('Withdraw loyalty points transaction input: ' . print_r($data, true));
+        $data = $request;
+
+        Log::info(config('loyalty_points.messages.withdraw_input') . print_r($data, true));
 
         $type = $data['account_type'];
         $id = $data['account_id'];
-        if (($type == 'phone' || $type == 'card' || $type == 'email') && $id != '') {
-            if ($account = LoyaltyAccount::where($type, '=', $id)->first()) {
-                if ($account->active) {
+        if (in_array($type, $this->account->account_type) && !empty($id)) {
+            $this->account->getAccount($type, $id);
+            if ($this->account) {
+                if ($this->account->active) {
                     if ($data['points_amount'] <= 0) {
-                        Log::info('Wrong loyalty points amount: ' . $data['points_amount']);
-                        return response()->json(['message' => 'Wrong loyalty points amount'], 400);
+                        Log::info(config('loyalty_points.messages.wrong_amount').': ' . $data['points_amount']);
+                        return response()->json(['message' => config('loyalty_points.messages.wrong_amount')], 400);
                     }
-                    if ($account->getBalance() < $data['points_amount']) {
-                        Log::info('Insufficient funds: ' . $data['points_amount']);
-                        return response()->json(['message' => 'Insufficient funds'], 400);
+                    if ($this->account->getBalance() < $data['points_amount']) {
+                        Log::info(config('loyalty_points.messages.insufficient_funds').': ' . $data['points_amount']);
+                        return response()->json(['message' => config('loyalty_points.messages.insufficient_funds')], 400);
                     }
 
-                    $transaction = LoyaltyPointsTransaction::withdrawLoyaltyPoints($account->id, $data['points_amount'], $data['description']);
+                    $transaction = $this->withdrawLoyaltyPoints($this->account->id, $data['points_amount'], $data['description']);
                     Log::info($transaction);
                     return $transaction;
                 } else {
-                    Log::info('Account is not active: ' . $type . ' ' . $id);
-                    return response()->json(['message' => 'Account is not active'], 400);
+                    Log::info(config('account.messages.not_active').': ' . $type . ' ' . $id);
+                    return response()->json(['message' => config('account.messages.not_active')], 400);
                 }
             } else {
-                Log::info('Account is not found:' . $type . ' ' . $id);
-                return response()->json(['message' => 'Account is not found'], 400);
+                Log::info(config('account.messages.not_found').':' . $type . ' ' . $id);
+                return response()->json(['message' => config('account.messages.not_found')], 400);
             }
         } else {
-            Log::info('Wrong account parameters');
-            throw new \InvalidArgumentException('Wrong account parameters');
+            Log::info(config('account.messages.parameters'));
+            throw new \InvalidArgumentException(config('account.messages.parameters'));
         }
+    }
+
+    /**
+     * Метод Создания транзакции
+     *
+     * account_id        - значение поля из типа
+     * account_type  - тип запроса (из массива $account_type)
+     * loyalty_points_rule  - правило начисления
+     * description  - описание
+     * payment_id  - ID платежа
+     * payment_amount  - сумма платежа
+     * payment_time  - время платежа
+     *
+     * @return LoyaltyPointsTransaction
+     * @author Mikhail Shapshay
+     */
+    private static function performPaymentLoyaltyPoints($account_id, $points_rule, $description, $payment_id, $payment_amount, $payment_time)
+    {
+        $points_amount = 0;
+
+        if ($pointsRule = LoyaltyPointsRule::where('points_rule', '=', $points_rule)->first()) {
+            /*$points_amount = match ($pointsRule->accrual_type) {
+                config('loyalty_points.accrual_type.relative') => ($payment_amount / 100) * $pointsRule->accrual_value,
+                config('loyalty_points.accrual_type.absolute') => $pointsRule->accrual_value,
+            };*/
+        }
+
+        return LoyaltyPointsTransaction::create([
+            'account_id' => $account_id,
+            'points_rule' => $pointsRule->id,
+            'points_amount' => $points_amount,
+            'description' => $description,
+            'payment_id' => $payment_id,
+            'payment_amount' => $payment_amount,
+            'payment_time' => $payment_time,
+        ]);
+    }
+
+    /**
+     * Метод Создания транзакции покупки
+     *
+     * account_id        - значение поля из типа
+     * description  - описание
+     * payment_amount  - сумма платежа
+     *
+     * @return LoyaltyPointsTransaction
+     * @author Mikhail Shapshay
+     */
+    private static function withdrawLoyaltyPoints($account_id, $points_amount, $description) {
+        return LoyaltyPointsTransaction::create([
+            'account_id' => $account_id,
+            'points_rule' => 'withdraw',
+            'points_amount' => -$points_amount,
+            'description' => $description,
+        ]);
     }
 }

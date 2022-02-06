@@ -15,7 +15,7 @@ class AccountController extends Controller
     /**
      * @var array
      */
-    private $account_type = array(
+    public $account_type = array(
         'phone',
         'card',
         'email'
@@ -36,6 +36,8 @@ class AccountController extends Controller
      * phone_notification    - признак отправки уведомлений на телефон
      * active      - признак активности аккаунта
      *
+     * @param Request $request
+     * @return LoyaltyAccount
      * @author Mikhail Shapshay
      */
     public function create(Request $request)
